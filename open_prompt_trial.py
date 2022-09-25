@@ -10,7 +10,7 @@ from openprompt import PromptDataLoader
 
 from transformers.tokenization_utils import PreTrainedTokenizer
 
-from prompt_ad_utils import read_input_text
+from prompt_ad_utils import read_input_text_len_control, read_input_no_len_control
 import argparse
 import pandas as pd
 import torch
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     
 
     MANUAL_TYPE = 'A'
-    SAMPLE_SIZE = 3
+    SAMPLE_SIZE = -1
     classes = [ # There are two classes in Sentiment Analysis, one for negative and one for positive
         "healthy",
         "dementia"
@@ -67,9 +67,11 @@ if __name__ == "__main__":
     train_df = pd.read_csv(data_save_dir + 'train_chas_{:s}.csv'.format(MANUAL_TYPE)) # transcripts
     test_df = pd.read_csv(data_save_dir + 'test_chas_{:s}.csv'.format(MANUAL_TYPE))
 
-    train_data_df = read_input_text(train_df, sample_size=3)
-    test_data_df = read_input_text(test_df, sample_size=3)
-
+    # train_data_df = read_input_text_len_control(train_df, sample_size=SAMPLE_SIZE)
+    # test_data_df = read_input_text_len_control(test_df, sample_size=SAMPLE_SIZE)
+    train_data_df = read_input_no_len_control(train_df, sample_size=SAMPLE_SIZE)
+    test_data_df = read_input_no_len_control(test_df, sample_size=SAMPLE_SIZE)
+    
     dataset = {'train': [], 'test': []}
     if SAMPLE_SIZE == -1:
         for index, data in train_data_df.iterrows():
@@ -125,14 +127,17 @@ if __name__ == "__main__":
 
     plm, tokenizer, model_config, WrapperClass = load_plm("bert", bert_model_dir)
     promptTemplate = ManualTemplate(
-        text = '{"meta": "text_c"}. Diagnosis is {"meta": "ans_c"}. {"meta": "text_d"}. Diagnosis is {"meta": "ans_d"}. {"placeholder": "text_a"}. Diagnosis is {"mask"}.', #'{"placeholder":"text_a"} Diagnosis is {"mask"}', 
+        text = '{"placeholder":"text_a", "shortenable":True} Diagnosis is {"mask"}',
+        # text = '{"meta": "text_c", "shortenable":True}. Diagnosis is {"meta": "ans_c"}. {"meta": "text_d", "shortenable":True}. Diagnosis is {"meta": "ans_d"}. {"placeholder": "text_a", "shortenable":True}. Diagnosis is {"mask"}.',
         tokenizer = tokenizer,
     )
+        # text = 'Patient tells story {"meta": "text_c"}. Cognitive of the patient is {"meta": "ans_c"}. Patient tells story {"meta": "text_d"}. Cognitive of the patient is {"meta": "ans_d"}. Patient tells story {"placeholder": "text_a"}. Cognitive of the patient is {"mask"}.', #'{"placeholder":"text_a"} Diagnosis is {"mask"}', 
+        # text = 'Transcriptions:  {"meta": "text_c"}. Cognitive of the patient is {"meta": "ans_c"}. Transcriptions:  {"meta": "text_d"}. Cognitive of the patient is {"meta": "ans_d"}. Transcriptions:  {"placeholder": "text_a"}. Cognitive of the patient is {"mask"}.', #'{"placeholder":"text_a"} Diagnosis is {"mask"}', 
 
     promptVerbalizer = ManualVerbalizer(
         classes = classes,
         label_words = {
-            "dementia": ["dementia", "disorder", "disease", "declined"],
+            "dementia": ["dementia", "disorder", "diseased", "declined"], # 
             "healthy": ["healthy", "normal", "fit"],
         },
         tokenizer = tokenizer,
@@ -151,12 +156,6 @@ if __name__ == "__main__":
 
     # wrapped_t5tokenizer= T5TokenizerWrapper(max_seq_length=128, decoder_max_length=3, tokenizer=tokenizer,truncate_method="head")
     # tokenized_example = wrapped_t5tokenizer.tokenize_one_example(wrapped_example, teacher_forcing=False)
-
-
-
-
-    # logits = torch.randn(2,len(tokenizer)) # creating a pseudo output from the plm, and
-    # print(promptVerbalizer.process_logits(logits)) # see what the verbalizer do
 
     train_data_loader = PromptDataLoader(
         dataset = dataset['train'],
@@ -185,6 +184,7 @@ if __name__ == "__main__":
                 batch = batch.to(device)
                 logits = promptModel(batch)
                 preds = torch.argmax(logits, dim = -1)
+                # print(classes[int(preds.cpu().numpy())])
                 correct += preds.eq(batch.label)
             print(correct/all_size)
             print(AD_size/all_size)
