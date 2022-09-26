@@ -141,6 +141,7 @@ cython_debug/
 .vscode/
 data/
 log/
+logs/
 new_split/
 old_split/
 split/

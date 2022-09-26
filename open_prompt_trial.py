@@ -42,6 +42,7 @@ if __name__ == "__main__":
     parser.add_argument("--gpu_id", type=int, default=0)
     parser.add_argument("--model_dir", type=str, default="bert-base-uncased")
     parser.add_argument("--data_dir", type=str, default="/project_bdda5/bdda/ywang/class_ncd/data/latest_tmp_dir/")
+    parser.add_argument("--tune_plm", type=bool, default=False)
 
     args = parser.parse_args()
 
@@ -51,7 +52,7 @@ if __name__ == "__main__":
 
     MANUAL_TYPE = 'A'
     SAMPLE_SIZE = -1
-    classes = [ # There are two classes in Sentiment Analysis, one for negative and one for positive
+    classes = [
         "healthy",
         "dementia"
     ]
