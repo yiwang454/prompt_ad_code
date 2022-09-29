@@ -151,6 +151,7 @@ split/
 
 # # Scripts that is not important
 # temp_*.py
+run*.py
 
 # running command
 

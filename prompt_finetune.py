@@ -706,6 +706,7 @@ def test_evaluation(prompt_model, ckpt_dir, dataloader):
 
     writer.add_scalar("test/loss", test_loss, 0)
     writer.add_scalar("test/balanced_accuracy", test_acc, 0)
+    print("test_acc", test_acc, test_prec_macro, test_recall_macro, test_f1_macro)
     writer.add_scalar("test/precision_weighted", test_prec_weighted, 0)
     writer.add_scalar("test/precision_macro", test_prec_macro, 0)
     writer.add_scalar("test/recall_weighted", test_recall_weighted, 0)
@@ -802,6 +803,7 @@ elif not do_training:
 
 if args.run_evaluation:
     logger.warning("Running evaluation on test set using best checkpoint!")
+    print('seed', args.seed)
     test_evaluation(prompt_model, ckpt_dir, test_data_loader)
 # write the contents to file
 
