@@ -78,10 +78,19 @@ def read_input_text_len_control(df, sample_size=-1, max_len=128, token_cut=True)
         list_output_dfs = [texts_df[["id", "joined_all_par_trans", "ad"]].iloc[i1:i2, :].reset_index(drop=True) for [i1, i2] in indexes_list]
         return list_output_dfs
 
-def read_input_no_len_control(df, sample_size=-1, max_len=512, token_cut=True):    
+def read_input_no_len_control(df, model, sample_size=-1, max_len=512, token_cut=True):    
     if token_cut:
         # tokenizer = AutoTokenizer.from_pretrained('/project_bdda5/bdda/ywang/class_ncd/new_models/bert-base-uncased')
-        tokenizer, _ = load_transformer_model_tokenizer(ppb.BertModel, ppb.BertTokenizer, '/project_bdda5/bdda/ywang/class_ncd/new_models/bert-base-uncased')
+        if 'bert' in model:
+            tokenizer, _ = load_transformer_model_tokenizer(ppb.BertModel, ppb.BertTokenizer, '/project_bdda5/bdda/ywang/class_ncd/new_models/bert-base-uncased')
+        elif 'Bio-ClinicalBERT' in model:
+            tokenizer, _ = load_transformer_model_tokenizer(ppb.BertModel, ppb.BertTokenizer, '/project_bdda5/bdda/ywang/class_ncd/new_models/Bio_ClinicalBERT')
+        elif 't5' in model:
+            tokenizer, _ = load_transformer_model_tokenizer(ppb.T5Model, ppb.T5Tokenizer, '/project_bdda5/bdda/ywang/class_ncd/new_models/t5-base')
+        # elif 'gpt' in model:
+        #     tokenizer, _ = load_transformer_model_tokenizer(ppb.GPT2Model, ppb.GPT2Tokenizer, '/project_bdda8/bdda/ywang/class_ncd/new_models/gpt2')
+        else:
+            raise ValueError
     else:
         raise NotImplemented
     

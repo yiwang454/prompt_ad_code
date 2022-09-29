@@ -72,7 +72,7 @@ parser.add_argument("--num_epochs", type=int, default=100)
 parser.add_argument("--batch_size", type=int, default=4)
 parser.add_argument("--init_from_vocab", action="store_true")
 # parser.add_argument("--eval_every_steps", type=int, default=100)
-parser.add_argument("--soft_token_num", type=int, default=20)
+parser.add_argument("--soft_token_num", type=int, default=5)
 parser.add_argument("--optimizer", type=str, default="adafactor")   
 parser.add_argument("--gradient_accum_steps", type = int, default = 1)
 # parser.add_argument("--dev_run",action="store_true")
@@ -113,9 +113,9 @@ from openprompt.plms import load_plm
 from prompt_ad_utils import read_input_text_len_control, read_input_no_len_control
 
 
-def loading_data_asexample(data_save_dir, sample_size, classes, mode='train', manual_type='A'):
+def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='train', manual_type='A'):
     train_df = pd.read_csv(data_save_dir + '{:s}_chas_{:s}.csv'.format(mode, manual_type)) # transcripts
-    train_data_df = read_input_no_len_control(train_df, sample_size=sample_size, max_len=512)
+    train_data_df = read_input_no_len_control(train_df, sample_size=sample_size, max_len=512, model=model)
 
     data_list = []
     if sample_size == -1:
@@ -140,7 +140,7 @@ def loading_data_asexample(data_save_dir, sample_size, classes, mode='train', ma
 
 # set up some variables to add to checkpoint and logs filenames
 time_now = str(datetime.now().strftime("%d-%m-%Y--%H-%M"))
-version = f"version_{time_now}"
+version = f"version_{time_now}_{args.seed}"
 
 off_line_model_dir = "/project_bdda5/bdda/ywang/class_ncd/new_models/"
 model_dict = {'bert-base-uncased': off_line_model_dir + 'bert-base-uncased',
@@ -226,9 +226,9 @@ if DATASET == "ADReSS":
     sampler_weights = args.sampler_weights    
     # get different splits
     SAMPLE_SIZE = -1
-    dataset['train'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, mode='train')
-    dataset['validation'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, mode='test') # for now we don't have extra validation set
-    dataset['test'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, mode='test')
+    dataset['train'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train')
+    dataset['validation'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test') # for now we don't have extra validation set
+    dataset['test'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test')
     # the below class labels should align with the label encoder fitted to training data
     # you will need to generate this class label text file first using the mimic processor with generate_class_labels flag to set true
     # e.g. Processor().get_examples(data_dir = args.data_dir, mode = "train", generate_class_labels = True)[:10000]
@@ -284,14 +284,24 @@ if args.verbalizer_type == "manual":
     myverbalizer = ManualVerbalizer(
         classes = class_labels,
         label_words = {
-            "dementia": ["dementia", "disorder", "diseased", "declined"], # 
-            "healthy": ["healthy", "normal", "fit"],
+            "dementia": ["dementia"], # 
+            "healthy": ["healthy"],
         },
         tokenizer = tokenizer,
     )
 elif args.verbalizer_type == "soft":
     print(f"soft verbalizer selected!")
-    myverbalizer = SoftVerbalizer(tokenizer, plm, num_classes=len(class_labels))
+    # myverbalizer = SoftVerbalizer(tokenizer, plm, num_classes=len(class_labels))
+    myverbalizer = SoftVerbalizer(
+            classes = class_labels,
+            label_words = {
+                "dementia": ["dementia"],
+                "healthy": ["healthy"],
+            },
+            tokenizer = tokenizer,
+            model = plm,
+            num_classes = len(class_labels)
+            )
 
     # we noticed a bug where soft verbalizer was technically not freezing alongside the PLM - meaning it had considerably greater number of trainable parameters
     # so if we want to properly freeze the verbalizer plm components as described here: https://github.com/thunlp/OpenPrompt/blob/4ba7cb380e7b42c19d566e9836dce7efdb2cc235/openprompt/prompts/soft_verbalizer.py#L82 
@@ -340,9 +350,12 @@ if args.training_size == "fewshot":
     dataset['validation'] = support_sampler(dataset['validation'], seed=args.seed)
     dataset['test'] = support_sampler(dataset['test'], seed=args.seed)
 
+max_seq_l = 512
 # are we doing training?
 do_training = (not args.no_training)
 if do_training:
+    if args.template_type == 'soft':
+        max_seq_l -= args.soft_token_num
     # if we have a sampler .e.g weightedrandomsampler. Do not shuffle
     if "WeightedRandom" in type(sampler).__name__:
         logger.warning("Sampler is WeightedRandom - will not be shuffling training data!")
@@ -355,6 +368,8 @@ if do_training:
         tokenizer = tokenizer, 
         template = mytemplate, 
         tokenizer_wrapper_class=WrapperClass,
+        max_seq_length=max_seq_l,
+        decoder_max_length=3,
     )
     # customPromptDataLoader(dataset=dataset["train"], template=mytemplate, tokenizer=tokenizer, 
     #     tokenizer_wrapper_class=WrapperClass, max_seq_length=max_seq_l, decoder_max_length=3, 
@@ -364,8 +379,10 @@ if do_training:
     validation_data_loader = PromptDataLoader(
         dataset = dataset['validation'],
         tokenizer = tokenizer, 
-        template = mytemplate, 
+        template = mytemplate,
         tokenizer_wrapper_class=WrapperClass,
+        max_seq_length=max_seq_l,
+        decoder_max_length=3,
     )
 
 
@@ -375,6 +392,8 @@ test_data_loader = PromptDataLoader(
     tokenizer = tokenizer, 
     template = mytemplate, 
     tokenizer_wrapper_class=WrapperClass,
+    max_seq_length=max_seq_l,
+    decoder_max_length=3,
 )
 
 
