@@ -78,7 +78,7 @@ def read_input_text_len_control(df, sample_size=-1, max_len=128, token_cut=True)
         list_output_dfs = [texts_df[["id", "joined_all_par_trans", "ad"]].iloc[i1:i2, :].reset_index(drop=True) for [i1, i2] in indexes_list]
         return list_output_dfs
 
-def read_input_no_len_control(df, model, sample_size=-1, max_len=512, token_cut=True):    
+def read_input_no_len_control(df, model, mode, sample_size=-1, max_len=512, token_cut=True):    
     if token_cut:
         # tokenizer = AutoTokenizer.from_pretrained('/project_bdda5/bdda/ywang/class_ncd/new_models/bert-base-uncased')
         if 'bert' in model:
@@ -91,8 +91,7 @@ def read_input_no_len_control(df, model, sample_size=-1, max_len=512, token_cut=
         #     tokenizer, _ = load_transformer_model_tokenizer(ppb.GPT2Model, ppb.GPT2Tokenizer, '/project_bdda8/bdda/ywang/class_ncd/new_models/gpt2')
         else:
             raise ValueError
-    else:
-        raise NotImplemented
+
     
     def pre_tokenizing(text):
         if isinstance(text, str):
@@ -102,12 +101,15 @@ def read_input_no_len_control(df, model, sample_size=-1, max_len=512, token_cut=
 
         return window_token_based_cut(text, tokenizer, max_len)[0]
 
-    df.joined_all_par_trans = df.joined_all_par_trans.apply(lambda x: pre_tokenizing(x))
+    if token_cut:
+        df.joined_all_par_trans = df.joined_all_par_trans.apply(lambda x: pre_tokenizing(x))        
 
     # texts_df = df[pre_tokened_series.apply(lambda x: True if len(x) == 1 else False)]
 
     if sample_size==-1:
         output_df = df[["id", "joined_all_par_trans", "ad"]]
+        # if token_cut:
+        #     output_df.to_csv('/project_bdda7/bdda/ywang/Public_Clinical_Prompt/split/{:s}_chas_A_cut.csv'.format(mode))
         return output_df.reset_index(drop=True)
     else:
         all_number = len(df)
