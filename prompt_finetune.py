@@ -33,6 +33,7 @@ import itertools
 from collections import Counter
 
 import os 
+import sys
 # # Kill all processes on GPU 6 and 7
 # os.system("""kill $(nvidia-smi | awk '$5=="PID" {p=1} p && $2 >= 6 && $2 < 7 {print $5}')""")
 
@@ -58,10 +59,11 @@ parser.add_argument("--run_evaluation",action="store_true")
 parser.add_argument("--model", type=str, default='bert', help="The plm to use e.g. t5-base, roberta-large, bert-base, emilyalsentzer/Bio_ClinicalBERT")
 parser.add_argument("--model_name", default='bert-base-uncased')
 parser.add_argument("--project_root", default="/project_bdda7/bdda/ywang/Public_Clinical_Prompt/", help="The project root in the file system, i.e. the absolute path of OpenPrompt")
+parser.add_argument("--logs_root", default="/project_bdda6/bdda/ywang/", help="The project root in the file system, i.e. the absolute path of OpenPrompt")
 parser.add_argument("--template_id", type=int, default = 0)
 parser.add_argument("--template_type", type=str, default ="manual")
 parser.add_argument("--verbalizer_type", type=str, default ="manual")
-parser.add_argument("--data_dir", type=str, default="/project_bdda5/bdda/ywang/class_ncd/data/latest_tmp_dir/") # sometimes, huggingface datasets can not be automatically downloaded due to network issue, please refer to 0_basic.py line 15 for solutions. 
+parser.add_argument("--data_dir", type=str, default="/project_bdda7/bdda/ywang/Public_Clinical_Prompt/split/") # sometimes, huggingface datasets can not be automatically downloaded due to network issue, please refer to 0_basic.py line 15 for solutions. 
 parser.add_argument("--scripts_path", type=str, default="prompt_ad/template")
 parser.add_argument("--max_steps", default=5000, type=int)
 parser.add_argument("--plm_lr", type=float, default=1e-05)
@@ -82,6 +84,9 @@ parser.add_argument("--ce_class_weights", action="store_true") # whether to appl
 parser.add_argument("--sampler_weights", action="store_true") # apply weights to weighted data sampler
 parser.add_argument("--training_size", type=str, default="full") # or fewshot or zero
 parser.add_argument("--no_ckpt", type=bool, default=False)
+parser.add_argument("--crossvalidation", action="store_true")
+parser.add_argument("--val_file_dir", type=str, default="/project_bdda5/bdda/ywang/class_ncd/data/latest_tmp_dir/ten_fold_1.json")
+parser.add_argument("--val_fold_idx", type=int, default=999)
 
 parser.add_argument(
         '--sensitivity',
@@ -97,6 +102,7 @@ parser.add_argument(
 #     help='Run the optimized frozen model after hp search '
 # )
 # instatiate args and set to variable
+
 args = parser.parse_args()
 
 logger.info(f" arguments provided were: {args}")
@@ -113,18 +119,44 @@ from openprompt.plms import load_plm
 from prompt_ad_utils import read_input_text_len_control, read_input_no_len_control
 
 
-def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='train', manual_type='A'):
-    train_df = pd.read_csv(data_save_dir + '{:s}_chas_{:s}.csv'.format(mode, manual_type)) # transcripts
-    train_data_df = read_input_no_len_control(train_df, sample_size=sample_size, max_len=512, model=model)
+def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='train', manual_type='A', data_saved=True, validation_dict=None):
+    if 'cv' in mode:
+        data_file  = data_save_dir + 'train_chas_{:s}'.format(manual_type)
+    else:
+        data_file  = data_save_dir + '{:s}_chas_{:s}'.format(mode, manual_type)
+    if data_saved:
+        data_file += '_cut.csv'
+    else:
+        data_file += '.csv'
+        
+    raw_df = pd.read_csv(data_file) # transcripts
+
+    if "cv" in mode:
+        assert validation_dict != None
+        train_speaker = validation_dict['train_speaker']
+        validation_speaker = validation_dict['test_speaker']
+        if mode == "train_cv":
+            load_data_df = raw_df[raw_df["id"].apply(lambda x: True if x in train_speaker else False)]
+        elif mode == "test_cv":
+            load_data_df = raw_df[raw_df["id"].apply(lambda x: True if x in validation_speaker else False)]
+
+    else:
+        load_data_df = raw_df
+    
+    if not data_saved:
+        org_data = read_input_no_len_control(load_data_df, mode=mode, sample_size=sample_size, max_len=512, model=model)
+
+    else:
+        org_data = read_input_no_len_control(load_data_df, mode=mode, sample_size=sample_size, max_len=512, model=model, token_cut=False)
 
     data_list = []
     if sample_size == -1:
-        for index, data in train_data_df.iterrows():
-            input_example = InputExample(text_a = data['joined_all_par_trans'], label=data['ad'], guid=index)
+        for index, data in org_data.iterrows():
+            input_example = InputExample(text_a = data['joined_all_par_trans'], label=data['ad'], guid=data["id"])
             data_list.append(input_example)
 
     elif sample_size > 0:
-        for idx, trn_df in enumerate(train_data_df):
+        for idx, trn_df in enumerate(org_data):
             meta = {
             "text_c" : trn_df.joined_all_par_trans[1],
             "text_d" : trn_df.joined_all_par_trans[2],
@@ -140,11 +172,23 @@ def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='tra
 
 # set up some variables to add to checkpoint and logs filenames
 time_now = str(datetime.now().strftime("%d-%m-%Y--%H-%M"))
-version = f"version_{time_now}_{args.seed}"
+raw_time_now = time_now.split('--')[0]
+if args.crossvalidation:
+    if args.val_file_dir == None:
+        raise ValueError("Need to specify val_file_dir")
+    assert args.val_file_dir.split(".")[-1] == 'json'
+    run_idx = int(args.val_file_dir.split("fold_")[-1].split('.')[0])
+    assert run_idx in range(1, 12)
+    version = f"version_{args.seed}_val"
+else:
+    version = f"version_{args.seed}"
 
 off_line_model_dir = "/project_bdda5/bdda/ywang/class_ncd/new_models/"
 model_dict = {'bert-base-uncased': off_line_model_dir + 'bert-base-uncased',
-            'bert-tuned': off_line_model_dir + 'bert_post_train_total_loss_lr00001_02_1/step1653'}
+            'bert-tuned28': off_line_model_dir + 'bert_post_train_total_loss_lr00001_02_1/step1596',
+            'bert-tuned29': off_line_model_dir + 'bert_post_train_total_loss_lr00001_02_1/step1653',
+            'bert-tuned30': off_line_model_dir + 'bert_post_train_total_loss_lr00001_02_1/step1710',
+            'roberta-base': off_line_model_dir + 'roberta-base'}
 
 plm, tokenizer, model_config, WrapperClass = load_plm(args.model, model_dict[args.model_name])
 
@@ -157,15 +201,15 @@ if args.tune_plm == True:
     # set checkpoint, logs and params save_dirs
     if args.sensitivity:
         logger.warning(f"performing sensitivity analysis experiment!")
-        logs_dir = f"{args.project_root}logs/sensitivity/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
+        logs_dir = f"{args.logs_root}logs/sensitivity/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
         ckpt_dir = f"{logs_dir}/checkpoints/"
     # elif args.optimized_run:
     #     logger.warning(f"performing optimized run!")
-    #     logs_dir = f"{args.project_root}logs/optimized/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
+    #     logs_dir = f"{args.logs_root}logs/optimized/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
     #     ckpt_dir = f"{logs_dir}/checkpoints/"
 
     else:
-        logs_dir = f"{args.project_root}logs/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
+        logs_dir = f"{args.logs_root}logs/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
         ckpt_dir = f"{logs_dir}/checkpoints/"
 else:
     logger.warning("Freezing the plm")
@@ -176,23 +220,23 @@ else:
         logger.warning("also will be explicitly freezing plm parts of the soft verbalizer")
         if args.sensitivity:
             logger.warning(f"performing sensitivity analysis experiment!")
-            logs_dir = f"{args.project_root}logs/sensitivity/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_frozenverb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
+            logs_dir = f"{args.logs_root}logs/sensitivity/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_frozenverb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
             ckpt_dir = f"{logs_dir}/checkpoints/"
         else:
-            logs_dir = f"{args.project_root}logs/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_frozenverb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
+            logs_dir = f"{args.logs_root}logs/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_frozenverb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
             ckpt_dir = f"{logs_dir}/checkpoints/" 
 
     else:# set checkpoint, logs and params save_dirs    
         if args.sensitivity:
             logger.warning(f"performing sensitivity analysis experiment!")
-            logs_dir = f"{args.project_root}logs/sensitivity/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
+            logs_dir = f"{args.logs_root}logs/sensitivity/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
             ckpt_dir = f"{logs_dir}/checkpoints/"
         # elif args.optimized_run:
         #     logger.warning(f"performing optimized run!")
-        #     logs_dir = f"{args.project_root}logs/optimized/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
+        #     logs_dir = f"{args.logs_root}logs/optimized/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
         #     ckpt_dir = f"{logs_dir}/checkpoints/"
         else:
-            logs_dir = f"{args.project_root}logs/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
+            logs_dir = f"{args.logs_root}logs/frozen_plm/{args.model_name}_temp{args.template_type}{args.template_id}_verb{args.verbalizer_type}_{args.training_size}_{args.few_shot_n}/{version}"
             ckpt_dir = f"{logs_dir}/checkpoints/"        
 # check if the checkpoint and params dir exists   
 
@@ -226,9 +270,17 @@ if DATASET == "ADReSS":
     sampler_weights = args.sampler_weights    
     # get different splits
     SAMPLE_SIZE = -1
-    dataset['train'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train')
-    dataset['validation'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test') # for now we don't have extra validation set
-    dataset['test'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test')
+    if args.crossvalidation:
+        with open(args.val_file_dir, 'r') as json_read:
+            cv_fold_list = json.load(json_read)
+        validation_dict = cv_fold_list[args.val_fold_idx]
+        dataset['train'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train_cv', validation_dict=validation_dict)
+        dataset['validation'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test_cv', validation_dict=validation_dict) # for now we don't have extra validation set
+        dataset['test'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test_cv', validation_dict=validation_dict)
+    else:
+        dataset['train'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train')
+        dataset['validation'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test') # for now we don't have extra validation set
+        dataset['test'] = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test')
     # the below class labels should align with the label encoder fitted to training data
     # you will need to generate this class label text file first using the mimic processor with generate_class_labels flag to set true
     # e.g. Processor().get_examples(data_dir = args.data_dir, mode = "train", generate_class_labels = True)[:10000]
@@ -252,9 +304,9 @@ else:
 
 # write hparams to file
 # lets write these arguments to file for later loading alongside the trained models
-
-with open(os.path.join(ckpt_dir, 'hparams.txt'), 'w') as f:
-    json.dump(args.__dict__, f, indent=2)
+if not os.path.exists(os.path.join(ckpt_dir, 'hparams.txt')):
+    with open(os.path.join(ckpt_dir, 'hparams.txt'), 'w') as f:
+        json.dump(args.__dict__, f, indent=2)
 # add the hparams to tensorboard logs
 # print(f"hparams dict: {args.__dict__}")
 save_metrics = {"random/metric": 0}
@@ -487,7 +539,6 @@ def train(prompt_model, train_data_loader, num_epochs, mode = "train", ckpt_dir 
     best_val_prec = 0    
     best_val_recall = 0
 
- 
 
     # this will be set to true when max steps are reached
     leave_training = False
@@ -554,35 +605,39 @@ def train(prompt_model, train_data_loader, num_epochs, mode = "train", ckpt_dir 
         # get epoch loss and write to tensorboard
 
         epoch_loss = tot_loss/len(train_data_loader)
-        print("Epoch {}, loss: {}".format(epoch, epoch_loss), flush=True)   
-        writer.add_scalar("train/epoch_loss", epoch_loss, epoch)
+        print("Epoch {}, loss: {}".format(epoch, epoch_loss), flush=True)          
+        if not args.crossvalidation:
+            writer.add_scalar("train/epoch_loss", epoch_loss, epoch)
 
         
         # run a run through validation set to get some metrics        
         val_loss, val_acc, val_prec_weighted, val_prec_macro, val_recall_weighted,val_recall_macro, val_f1_weighted,val_f1_macro, val_auc_weighted,val_auc_macro, cm_figure = evaluate(prompt_model, validation_data_loader)
+        if not args.crossvalidation:
+            writer.add_scalar("valid/loss", val_loss, epoch)
+            writer.add_scalar("valid/balanced_accuracy", val_acc, epoch)
+            writer.add_scalar("valid/precision_weighted", val_prec_weighted, epoch)
+            writer.add_scalar("valid/precision_macro", val_prec_macro, epoch)
+            writer.add_scalar("valid/recall_weighted", val_recall_weighted, epoch)
+            writer.add_scalar("valid/recall_macro", val_recall_macro, epoch)
+            writer.add_scalar("valid/f1_weighted", val_f1_weighted, epoch)
+            writer.add_scalar("valid/f1_macro", val_f1_macro, epoch)
 
-        writer.add_scalar("valid/loss", val_loss, epoch)
-        writer.add_scalar("valid/balanced_accuracy", val_acc, epoch)
-        writer.add_scalar("valid/precision_weighted", val_prec_weighted, epoch)
-        writer.add_scalar("valid/precision_macro", val_prec_macro, epoch)
-        writer.add_scalar("valid/recall_weighted", val_recall_weighted, epoch)
-        writer.add_scalar("valid/recall_macro", val_recall_macro, epoch)
-        writer.add_scalar("valid/f1_weighted", val_f1_weighted, epoch)
-        writer.add_scalar("valid/f1_macro", val_f1_macro, epoch)
+            #TODO add binary classification metrics e.g. roc/auc
+            writer.add_scalar("valid/auc_weighted", val_auc_weighted, epoch)
+            writer.add_scalar("valid/auc_macro", val_auc_macro, epoch)        
 
-        #TODO add binary classification metrics e.g. roc/auc
-        writer.add_scalar("valid/auc_weighted", val_auc_weighted, epoch)
-        writer.add_scalar("valid/auc_macro", val_auc_macro, epoch)        
-
-        # add cm to tensorboard
-        writer.add_figure("valid/Confusion_Matrix", cm_figure, epoch)
+            # add cm to tensorboard
+            writer.add_figure("valid/Confusion_Matrix", cm_figure, epoch)
 
         # save checkpoint if validation accuracy improved
         if val_acc >= best_val_acc:
             # only save ckpts if no_ckpt is False - we do not always want to save - especially when developing code
             if not args.no_ckpt:
                 logger.warning(f"Accuracy improved! Saving checkpoint at :{ckpt_dir}!")
-                torch.save(prompt_model.state_dict(),os.path.join(ckpt_dir, "best-checkpoint.ckpt"))
+                if not args.crossvalidation:
+                    torch.save(prompt_model.state_dict(),os.path.join(ckpt_dir, "best-checkpoint.ckpt"))
+                else:
+                    torch.save(prompt_model.state_dict(),os.path.join(ckpt_dir, "best-checkpoint_cv{}_fold{}.ckpt".format(run_idx, args.val_fold_idx)))
             best_val_acc = val_acc
 
 
@@ -684,7 +739,15 @@ def evaluate(prompt_model, dataloader, mode = "validation", class_labels = class
         test_report = classification_report(alllabels, allpreds, target_names=class_labels, output_dict=True)
         # now to file
         test_report_df = pd.DataFrame(test_report).transpose()
-        test_report_df.to_csv(os.path.join(ckpt_dir, "test_class_report.csv"), index = False)
+        if args.crossvalidation:
+            test_report_name = "test_class_report_cv{}_fold{}.csv".format(run_idx, args.val_fold_idx)
+            test_results_name = "test_results_cv{}_fold{}.csv".format(run_idx, args.val_fold_idx)
+            figure_name = "test_cm_cv{}_fold{}.png".format(run_idx, args.val_fold_idx)
+        else:
+            test_report_name = "test_class_report.csv"
+            test_results_name = "test_results.csv"
+            figure_name = "test_cm.png"
+        test_report_df.to_csv(os.path.join(ckpt_dir, test_report_name), index = False)
         
         # save logits etc
         
@@ -695,10 +758,10 @@ def evaluate(prompt_model, dataloader, mode = "validation", class_labels = class
         results_dict['logits'] = alllogits
         results_dict['probas'] = allscores
         # save dataframe and to csv
-        pd.DataFrame(results_dict).to_csv(os.path.join(ckpt_dir, "test_results.csv"), index =False)
+        pd.DataFrame(results_dict).to_csv(os.path.join(ckpt_dir, test_results_name), index =False)
 
         # save confusion matrix
-        cm_figure.savefig(os.path.join(ckpt_dir, "test_cm.png"))
+        cm_figure.savefig(os.path.join(ckpt_dir, figure_name))
 
     
     return val_loss, acc, prec_weighted, prec_macro, recall_weighted, recall_macro, f1_weighted, f1_macro, roc_auc_weighted, roc_auc_macro, cm_figure
@@ -710,8 +773,10 @@ def test_evaluation(prompt_model, ckpt_dir, dataloader):
     # once model is trained we want to load best checkpoint back in and evaluate on test set - then log to tensorboard and save logits and few other things to file?
 
     # first load the state_dict using the ckpt_dir of the best model i.e. should be best-checkpoint.ckpt found in the ckpt_dir
-
-    loaded_model = torch.load(os.path.join(ckpt_dir, "best-checkpoint.ckpt"))
+    if not args.crossvalidation:
+        loaded_model = torch.load(os.path.join(ckpt_dir, "best-checkpoint.ckpt"))
+    else:
+        loaded_model = torch.load(os.path.join(ckpt_dir, "best-checkpoint_cv{}_fold{}.ckpt".format(run_idx, args.val_fold_idx)))
 
     # now load this into the already create PromptForClassification object i.e. the supplied prompt_model
     prompt_model.load_state_dict(state_dict = loaded_model)
@@ -721,24 +786,24 @@ def test_evaluation(prompt_model, ckpt_dir, dataloader):
     test_loss, test_acc, test_prec_weighted, test_prec_macro, test_recall_weighted,test_recall_macro, test_f1_weighted,test_f1_macro, test_auc_weighted,test_auc_macro, cm_figure = evaluate(prompt_model,
                                                                                                                     mode = 'test', dataloader = dataloader)
 
-    # write to tensorboard
+    if not args.crossvalidation:
+        # write to tensorboard
 
-    writer.add_scalar("test/loss", test_loss, 0)
-    writer.add_scalar("test/balanced_accuracy", test_acc, 0)
-    print("test_acc", test_acc, test_prec_macro, test_recall_macro, test_f1_macro)
-    writer.add_scalar("test/precision_weighted", test_prec_weighted, 0)
-    writer.add_scalar("test/precision_macro", test_prec_macro, 0)
-    writer.add_scalar("test/recall_weighted", test_recall_weighted, 0)
-    writer.add_scalar("test/recall_macro", test_recall_macro, 0)
-    writer.add_scalar("test/f1_weighted", test_f1_weighted, 0)
-    writer.add_scalar("test/f1_macro", test_f1_macro, 0)
+        writer.add_scalar("test/loss", test_loss, 0)
+        writer.add_scalar("test/balanced_accuracy", test_acc, 0)
+        writer.add_scalar("test/precision_weighted", test_prec_weighted, 0)
+        writer.add_scalar("test/precision_macro", test_prec_macro, 0)
+        writer.add_scalar("test/recall_weighted", test_recall_weighted, 0)
+        writer.add_scalar("test/recall_macro", test_recall_macro, 0)
+        writer.add_scalar("test/f1_weighted", test_f1_weighted, 0)
+        writer.add_scalar("test/f1_macro", test_f1_macro, 0)
 
-    #TODO add binary classification metrics e.g. roc/auc
-    writer.add_scalar("test/auc_weighted", test_auc_weighted, 0)
-    writer.add_scalar("test/auc_macro", test_auc_macro, 0)        
+        #TODO add binary classification metrics e.g. roc/auc
+        writer.add_scalar("test/auc_weighted", test_auc_weighted, 0)
+        writer.add_scalar("test/auc_macro", test_auc_macro, 0)        
 
-    # add cm to tensorboard
-    writer.add_figure("test/Confusion_Matrix", cm_figure, 0)
+        # add cm to tensorboard
+        writer.add_figure("test/Confusion_Matrix", cm_figure, 0)
 
 # nicer plot
 def plot_confusion_matrix(cm, class_names):
