@@ -5,3 +5,11 @@ Diagnosis is {"mask"}. {"placeholder": "text_a"}
 {"placeholder": "text_a"} random word {"mask"}.
 {"mask"}. {"placeholder": "text_a"}. 
 {"placeholder": "text_a"}. {"mask"}. 
+Diagnosis is {"mask"}. Patient is {"meta": "age"}. {"placeholder": "text_a"}
+{"placeholder": "text_a"} Patient is {"meta": "age"}. Diagnosis is {"mask"}.
+Patient is {"meta": "age"}. Diagnosis is {"mask"}. {"placeholder": "text_a"}
+{"placeholder": "text_a"} Diagnosis is {"mask"}. Patient is {"meta": "age"}. 
+Diagnosis is {"mask"}. Speech is {"meta": "fluency"}. {"placeholder": "text_a"}
+{"placeholder": "text_a"} Speech is {"meta": "fluency"}. Diagnosis is {"mask"}.
+Speech is {"meta": "fluency"}. Diagnosis is {"mask"}. {"placeholder": "text_a"}
+{"placeholder": "text_a"} Diagnosis is {"mask"}. Speech is {"meta": "fluency"}.
