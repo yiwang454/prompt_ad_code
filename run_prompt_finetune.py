@@ -25,7 +25,7 @@ for template_id in [1, 3]:
                     --no_ckpt True \
                     --last_ckpt \
                     --crossvalidation \
-                    --val_file_dir prompt_ad/latest_tmp_dir/ten_fold_1.json \
+                    --val_file_dir prompt_ad_code/latest_tmp_dir/ten_fold_1.json \
                     --val_fold_idx {} \
                     --no_tensorboard '''.format(seed, template_id, GPU_idx, fold_idx)
             COMMAND_LIST.append(command)

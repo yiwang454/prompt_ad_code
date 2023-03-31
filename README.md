@@ -16,8 +16,13 @@ Before running the ```run_prompt_finetune.py``` or ```run_prompt_finetune_test.p
 --off_line_model_dir /directory/you/store/pre-trained/model/from/huggingface \
 --data_dir /directory/you/store/ADReSS/data \
 ```
+Also, you have to change ```CWD = ""``` in ```run_prompt_finetune.py``` or ```run_prompt_finetune_test.py``` scripts into your working directory.
 
-### Data Format
+<!-- ```python
+CWD = "/directory/you/are/working/in"
+``` -->
+
+<!-- ### Data Format -->
 
 
 ### Data Split

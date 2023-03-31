@@ -66,6 +66,7 @@ parser.add_argument("--template_type", type=str, default ="manual")
 parser.add_argument("--verbalizer_type", type=str, default ="manual")
 parser.add_argument("--manual_type", type=str, default ="A")
 parser.add_argument("--data_dir", type=str)
+parser.add_argument("--data_not_saved", action="store_true")
 parser.add_argument("--scripts_path", type=str, default="prompt_ad_code/template")
 parser.add_argument("--max_steps", default=5000, type=int)
 parser.add_argument("--plm_lr", type=float, default=1e-05)
@@ -128,18 +129,15 @@ from openprompt.plms import load_plm
 from prompt_ad_utils import read_input_text_len_control, read_input_no_len_control
 
 
-def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='train', data_saved=True, validation_dict=None):
-    # trans_type = 'chas', manual_type='A', 
-    # if trans_type in ['cnntdnn', "sys14_26.4", "sys18_25.9"]:
-    #     assert mode == 'test'
+def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='train', validation_dict=None):
     if 'cv' in mode:
-        data_file = data_save_dir + 'train_chas_A' # .format(trans_type, manual_type)
+        data_file = os.path.join(data_save_dir, 'train_chas_A') # .format(trans_type, manual_type)
     else:
-        data_file  = data_save_dir + '{:s}_chas_A'.format(mode)
-    if data_saved:
-        data_file += '_cut.csv'
-    else:
+        data_file  = os.path.join(data_save_dir, '{:s}_chas_A'.format(mode))
+    if args.data_not_saved:
         data_file += '.csv'
+    else:
+        data_file += '_cut.csv'
         
     raw_df = pd.read_csv(data_file) # transcripts
 
@@ -155,9 +153,9 @@ def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='tra
     else:
         load_data_df = raw_df
     
-    if not data_saved:
+    if args.data_not_saved:
+         '{:s}_{:s}_{}_cut.csv'.format(mode, trans_type, manual_type)
         org_data = read_input_no_len_control(load_data_df, mode=mode, sample_size=sample_size, max_len=512, model=model, trans_type="chas", manual_type="A")
-
     else:
         org_data = read_input_no_len_control(load_data_df, mode=mode, sample_size=sample_size, max_len=512, model=model, token_cut=False, trans_type="chas", manual_type="A")
 
@@ -165,7 +163,7 @@ def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='tra
     label_list = []
     if sample_size == -1:
         for index, data in org_data.iterrows():
-            input_example = InputExample(text_a = data['joined_all_par_trans'], label=data['ad'], meta=meta, guid=data["id"])
+            input_example = InputExample(text_a = data['joined_all_par_trans'], label=data['ad'], guid=data["id"])
             data_list.append(input_example)
             label_list.append(data['ad'])
         return data_list, Counter(label_list)
@@ -201,13 +199,12 @@ else:
 
 model_dict = {'bert-base-uncased': os.path.join(args.off_line_model_dir, 'bert-base-uncased'),
             'roberta-base': os.path.join(args.off_line_model_dir, 'roberta-base'),}
-for epoch in range(30):
-    model_dict['bert-tuned{}'.format(epoch+1)] = args.off_line_model_dir + 'bert_post_train_total_loss_lr00001_02_1/step{}'.format((epoch+1) * 57)
 
 plm, tokenizer, model_config, WrapperClass = load_plm(args.model, model_dict[args.model_name])
 
 # edit based on whether or not plm was frozen during training
 # actually want to save the checkpoints and logs in same place now. Becomes a lot easier to manage later
+args.logs_root = args.logs_root.strip("/") + "/"
 if args.tune_plm == True:
     logger.warning("Unfreezing the plm - will be updated during training")
     freeze_plm = False
@@ -297,16 +294,16 @@ if DATASET == "ADReSS":
             cv_fold_list = json.load(json_read)
         validation_dict = cv_fold_list[args.val_fold_idx]
         dataset['train'], train_classes_count = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train_cv', validation_dict=validation_dict)
-        dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test_cv', validation_dict=validation_dict) # for now we don't have extra validation set
+        dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test_cv', validation_dict=validation_dict)
         dataset['test'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test_cv', validation_dict=validation_dict)
     else:
         if args.transcription == 'chas':
             dataset['train'], train_classes_count = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train', manual_type=args.manual_type)
-            dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', manual_type=args.manual_type) # for now we don't have extra validation set
+            dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', manual_type=args.manual_type)
             dataset['test'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', manual_type=args.manual_type)
         elif args.transcription in ['cnntdnn', 'sys14_26.4', 'sys18_25.9']: # for asr trans
             dataset['train'], train_classes_count = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train') 
-            dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', trans_type = args.transcription, manual_type=args.asr_format) # for now we don't have extra validation set
+            dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', trans_type = args.transcription, manual_type=args.asr_format)
             dataset['test'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', trans_type = args.transcription, manual_type=args.asr_format) # , data_saved=False
     
     # the below class labels should align with the label encoder fitted to training data
@@ -331,6 +328,7 @@ else:
     #TODO implement los and mimic readmission
     raise NotImplementedError
 
+sys.exit()
 assert model_parallelize == False
 
 # write hparams to file

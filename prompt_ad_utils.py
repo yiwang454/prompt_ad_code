@@ -15,6 +15,7 @@ def load_transformer_model_tokenizer(model_class, tokenizer_class, pretrained_we
     return tokenizer, model
 
 def simple_split_sentences(text):
+    '''split sentences'''
     # text_write = re.split(r"(\(\.+\)|\+\.+|\.|\?)", text)
 
     text_write = re.split(r"(\.|\?|\。|\,|\，)", text) 
@@ -51,6 +52,7 @@ def window_tokenizer(subject_text, tokenizer, max_len):
     return tokenized_windows
 
 def window_token_based_cut(subject_text, tokenizer, max_len):
+    '''cut trans tokens into windows'''
     max_token_len = max_len-2
     tokenized_windows = []
     current_window = []
@@ -100,48 +102,38 @@ def read_input_text_len_control(df, sample_size=-1, max_len=128, token_cut=True)
         list_output_dfs = [texts_df[["id", "joined_all_par_trans", "ad"]].iloc[i1:i2, :].reset_index(drop=True) for [i1, i2] in indexes_list]
         return list_output_dfs
 
-def read_input_no_len_control(df, model, mode, sample_size=-1, max_len=512, token_cut=True, trans_type='chas', manual_type='A'):    
-    label_map = {"Major_NCD": 1, "minor_NCD": 1, "Health": 0}
-    if token_cut:
-        # tokenizer = AutoTokenizer.from_pretrained('/project_bdda5/bdda/ywang/class_ncd/new_models/bert-base-uncased')
+def read_input_no_len_control(df, model, mode, sample_size=-1, max_len=512, token_cut=True, trans_type='chas', manual_type='A', save_trans=None):    
+    if save_trans is not None:
         if 'bert' in model and 'chinese' not in model:
-            tokenizer, _ = load_transformer_model_tokenizer(ppb.BertModel, ppb.BertTokenizer, '/project_bdda5/bdda/ywang/class_ncd/new_models/bert-base-uncased')
-        elif 'Bio-ClinicalBERT' in model:
-            tokenizer, _ = load_transformer_model_tokenizer(ppb.BertModel, ppb.BertTokenizer, '/project_bdda5/bdda/ywang/class_ncd/new_models/Bio_ClinicalBERT')
+            tokenizer, _ = load_transformer_model_tokenizer(ppb.BertModel, ppb.BertTokenizer, 'bert-base-uncased')
         elif 't5' in model:
-            tokenizer, _ = load_transformer_model_tokenizer(ppb.T5Model, ppb.T5Tokenizer, '/project_bdda5/bdda/ywang/class_ncd/new_models/t5-base')
+            tokenizer, _ = load_transformer_model_tokenizer(ppb.T5Model, ppb.T5Tokenizer, 't5-base')
         # elif 'gpt' in model:
-        #     tokenizer, _ = load_transformer_model_tokenizer(ppb.GPT2Model, ppb.GPT2Tokenizer, '/project_bdda8/bdda/ywang/class_ncd/new_models/gpt2')
-        elif 'chinese-roberta' in model:
-            tokenizer, _ = load_transformer_model_tokenizer(ppb.BertModel, ppb.BertTokenizer, '/project_bdda8/bdda/ywang/Public_Clinical_Prompt/logs/chinese-roberta-wwm-ext')
+        #     tokenizer, _ = load_transformer_model_tokenizer(ppb.GPT2Model, ppb.GPT2Tokenizer, 'gpt2')
         else:
             raise ValueError
 
-    
-    def pre_tokenizing(text):
-        if isinstance(text, str):
-            text = simple_split_sentences(text.strip('.'))
-        else:
-            raise ValueError('wrong type of text read from chas csv')
+        def pre_tokenizing(text):
+            '''split into sentences -> tokenize'''
+            if isinstance(text, str):
+                text = simple_split_sentences(text.strip('.'))
+            else:
+                raise ValueError('wrong type of text read from chas csv')
 
-        return window_token_based_cut(text, tokenizer, max_len)[0]
+            return window_token_based_cut(text, tokenizer, max_len)[0]
 
-
-    if token_cut:
         df.joined_all_par_trans = df.joined_all_par_trans.apply(lambda x: pre_tokenizing(x))    
-        if "count_allsym" not in df.columns:
-            df["count_allsym"] = pd.Series([-1 for _ in range(len(df))])
 
-    df.ad = df.ad.apply(lambda x: label_map[x])
     # texts_df = df[pre_tokened_series.apply(lambda x: True if len(x) == 1 else False)]
 
     if sample_size==-1:
-        output_df = df[["id", "joined_all_par_trans", "ad", "age", "count_allsym"]] # "age_group", 
-        # if token_cut:
-        #     output_df.to_csv('/project_bdda7/bdda/ywang/Public_Clinical_Prompt/split/{:s}_{:s}_{}_cut.csv'.format(mode, trans_type, manual_type))
+        output_df = df[["id", "joined_all_par_trans", "ad", "age"]] # "age_group", 
+        if save_trans is not None:
+            output_df.to_csv(save_trans)
         return output_df.reset_index(drop=True)
     else:
-        all_number = len(df)
-        indexes_list = [[i*sample_size, (i+1)*sample_size] for i in range(all_number // sample_size)] # + [[all_number-all_number%sample_size, all_number]]
-        list_output_dfs = [df[["id", "joined_all_par_trans", "ad", "age", "count_allsym"]].iloc[i1:i2, :].reset_index(drop=True) for [i1, i2] in indexes_list] # "age_group",
-        return list_output_dfs
+        raise NotImplemented
+        # all_number = len(df)
+        # indexes_list = [[i*sample_size, (i+1)*sample_size] for i in range(all_number // sample_size)] # + [[all_number-all_number%sample_size, all_number]]
+        # list_output_dfs = [df[["id", "joined_all_par_trans", "ad", "age"]].iloc[i1:i2, :].reset_index(drop=True) for [i1, i2] in indexes_list] # "age_group",
+        # return list_output_dfs
