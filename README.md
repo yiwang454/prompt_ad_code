@@ -22,13 +22,22 @@ Also, you have to change ```CWD = ""``` in ```run_prompt_finetune.py``` or ```ru
 CWD = "/directory/you/are/working/in"
 ``` -->
 
-<!-- ### Data Format -->
-
-
 ### Data Split
 We adopt the given train and test split from the ADReSS2020 dataset, with train speaker ids all stored in ```prompt_ad_code/latest_tmp_dir/train_all_spk.json```, and test speaker ids all stored in  ```prompt_ad_code/latest_tmp_dir/test_all_spk.json```. In cross validation experiments, we adopt 10 fold cross validtion, with validation split stored in ```prompt_ad_code/latest_tmp_dir/ten_fold_1.json```. 
 
 ```ten_fold_1.json``` is a list with 10 entries. After 108 training speakers being splitted into 10 folds, each fold takes turns to serve as the validation set, leading to 10 train-validation set pairs. 10 entries of the list stored the dictionary of {"train_speaker": list_of_train_speaker, "test_speaker": list_of_test_speaker} representing a corresonding train-validation set pair. 
+
+
+### Data Format
+In your data directory, you'd have to store the ADReSS train data in csv file named ```train_chas_A.csv``` and test data in csv file named ```test_chas_A.csv``` with columns named ```id```, ```age```, ```joined_all_par_trans```, ```ad```, **without the index column for csv**. ```joined_all_par_trans``` should store a single string. The string is constructed by all transcript sentences of that corresponding speaker being joined together. 
+
+An example of ```train_chas_A.csv``` without any actual transcripts is in ```prompt_ad_code/data```
+
+You may want to involve a data pre-processing step which cuts the transcripts of each participant into the window length of 512 tokens (cutting at intervals between full sentences, so the resulted length may be slightly less than 512 tokens). This is done by adding ```--data_not_saved``` config into ```run_prompt_finetune_test.py```; adding ```COMMAND_LIST = COMMAND_LIST[:1]``` to around line 30 in ```run_prompt_finetune_test.py``` and run for once. It will give you ```train_chas_A_cut.csv``` and ```test_chas_A_cut.csv``` files storing the cut data. The ```--data_not_saved``` flag will let the script stop running after saving data without running any experiments. 
+
+In real experiments running, please ensure you remove this config from ```run_prompt_finetune_test.py``` and remove the ```COMMAND_LIST = COMMAND_LIST[:1]``` in ```run_prompt_finetune_test.py```.
+
+If you prefer other data formatting, you can change the data loader part in ```prompt_finetune.py``` lines 127-179, and its corresponding functions in ```prompt_ad_utils.py```, and maybe ```prompt_finetune.py``` lines 272-302 accordingly.
 
 ### Cross Validation
 To run the prompt-based fine-tuning with BERT as the PLM, and get 5 fold cross validation (CV) results:

@@ -39,12 +39,7 @@ import sys
 
 '''
 Script to run different setups of prompt learning.
-Right now this is primarily set up for the mimic_top50_icd9 task, although it is quite flexible to other datasets. Any datasets need a corresponding processor class in utils.
-example usage. python prompt_experiment_runner.py --model bert --model_name bert-base-uncased --num_epochs 10 --tune_plm
-other example usage:
-- python prompt_experiment_runner.py --model t5 --model_name razent/SciFive-base-Pubmed_PMC --num_epochs 10 --template_id 0 --template_type soft --max_steps 15000 --tune_plm
 '''
-
 
 # create a args parser with required arguments.
 parser = argparse.ArgumentParser("")
@@ -142,7 +137,10 @@ def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='tra
     raw_df = pd.read_csv(data_file) # transcripts
 
     if "cv" in mode:
-        assert validation_dict != None
+        if validation_dict == None:
+            raise ValueError("Cross validation mode requires validation_dict input")
+        if args.data_not_saved:
+            raise ValueError("Data proprocessing (when data_not_saved == True) is only supported by test mode")
         train_speaker = validation_dict['train_speaker']
         validation_speaker = validation_dict['test_speaker']
         if mode == "train_cv":
@@ -154,10 +152,10 @@ def loading_data_asexample(data_save_dir, sample_size, classes, model, mode='tra
         load_data_df = raw_df
     
     if args.data_not_saved:
-         '{:s}_{:s}_{}_cut.csv'.format(mode, trans_type, manual_type)
-        org_data = read_input_no_len_control(load_data_df, mode=mode, sample_size=sample_size, max_len=512, model=model, trans_type="chas", manual_type="A")
+        cut_data_save_path = os.path.join(data_save_dir, '{:s}_chas_A_cut.csv'.format(mode))
+        org_data = read_input_no_len_control(load_data_df, sample_size=sample_size, max_len=512, model=model, save_trans=cut_data_save_path)
     else:
-        org_data = read_input_no_len_control(load_data_df, mode=mode, sample_size=sample_size, max_len=512, model=model, token_cut=False, trans_type="chas", manual_type="A")
+        org_data = read_input_no_len_control(load_data_df, sample_size=sample_size, max_len=512, model=model, save_trans=None)
 
     data_list = []
     label_list = []
@@ -204,7 +202,8 @@ plm, tokenizer, model_config, WrapperClass = load_plm(args.model, model_dict[arg
 
 # edit based on whether or not plm was frozen during training
 # actually want to save the checkpoints and logs in same place now. Becomes a lot easier to manage later
-args.logs_root = args.logs_root.strip("/") + "/"
+args.logs_root = args.logs_root.rstrip("/") + "/"
+args.project_root = args.project_root.rstrip("/") + "/"
 if args.tune_plm == True:
     logger.warning("Unfreezing the plm - will be updated during training")
     freeze_plm = False
@@ -298,13 +297,13 @@ if DATASET == "ADReSS":
         dataset['test'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test_cv', validation_dict=validation_dict)
     else:
         if args.transcription == 'chas':
-            dataset['train'], train_classes_count = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train', manual_type=args.manual_type)
-            dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', manual_type=args.manual_type)
-            dataset['test'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', manual_type=args.manual_type)
+            dataset['train'], train_classes_count = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train')
+            dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test')
+            dataset['test'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test')
         elif args.transcription in ['cnntdnn', 'sys14_26.4', 'sys18_25.9']: # for asr trans
             dataset['train'], train_classes_count = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='train') 
-            dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', trans_type = args.transcription, manual_type=args.asr_format)
-            dataset['test'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test', trans_type = args.transcription, manual_type=args.asr_format) # , data_saved=False
+            dataset['validation'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test')
+            dataset['test'], _ = loading_data_asexample(data_dir, SAMPLE_SIZE, class_labels, args.model_name, mode='test') # , data_saved=False
     
     # the below class labels should align with the label encoder fitted to training data
     if args.ce_class_weights:
@@ -328,7 +327,8 @@ else:
     #TODO implement los and mimic readmission
     raise NotImplementedError
 
-sys.exit()
+if args.data_not_saved:
+    sys.exit()
 assert model_parallelize == False
 
 # write hparams to file

@@ -13,7 +13,6 @@ for template_id in [1, 3]:
                 --logs_root /directory/to/store/your/output \
                 --off_line_model_dir /directory/you/store/pre-trained/model/from/huggingface \
                 --data_dir /directory/you/store/ADReSS/data \
-                 --data_not_saved \           
                 --seed {:d} \
                 --tune_plm \
                 --model bert \

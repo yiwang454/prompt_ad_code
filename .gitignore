@@ -139,3 +139,4 @@ cython_debug/
 
 # local test 
 run_prompt_finetune2.py
+run_prompt_finetune_test2.py

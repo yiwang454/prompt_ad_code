@@ -102,7 +102,7 @@ def read_input_text_len_control(df, sample_size=-1, max_len=128, token_cut=True)
         list_output_dfs = [texts_df[["id", "joined_all_par_trans", "ad"]].iloc[i1:i2, :].reset_index(drop=True) for [i1, i2] in indexes_list]
         return list_output_dfs
 
-def read_input_no_len_control(df, model, mode, sample_size=-1, max_len=512, token_cut=True, trans_type='chas', manual_type='A', save_trans=None):    
+def read_input_no_len_control(df, model, sample_size=-1, max_len=512, save_trans=None):    
     if save_trans is not None:
         if 'bert' in model and 'chinese' not in model:
             tokenizer, _ = load_transformer_model_tokenizer(ppb.BertModel, ppb.BertTokenizer, 'bert-base-uncased')
